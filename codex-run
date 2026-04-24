@@ -1,0 +1,149 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$#" -lt 2 ] || [ "$#" -gt 6 ]; then
+  echo "用法: codex-run <project_dir> <task> [--resume] [--watch] [--ctx <id>]" >&2
+  exit 1
+fi
+
+PROJECT_DIR=$1
+TASK=$2
+RESUME_FLAG=
+WATCH_FLAG=
+CTX_ID=
+
+shift 2
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --resume)
+      if [ -n "$RESUME_FLAG" ]; then
+        echo "参数重复: --resume" >&2
+        exit 1
+      fi
+      RESUME_FLAG=1
+      shift
+      ;;
+    --watch)
+      if [ -n "$WATCH_FLAG" ]; then
+        echo "参数重复: --watch" >&2
+        exit 1
+      fi
+      WATCH_FLAG=1
+      shift
+      ;;
+    --ctx)
+      if [ -n "$CTX_ID" ]; then
+        echo "参数重复: --ctx" >&2
+        exit 1
+      fi
+      if [ "$#" -lt 2 ]; then
+        echo "参数缺失: --ctx <id>" >&2
+        echo "用法: codex-run <project_dir> <task> [--resume] [--watch] [--ctx <id>]" >&2
+        exit 1
+      fi
+      CTX_ID=$2
+      shift 2
+      ;;
+    *)
+      echo "不支持的参数: $1" >&2
+      echo "用法: codex-run <project_dir> <task> [--resume] [--watch] [--ctx <id>]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ ! -d "$PROJECT_DIR" ]; then
+  echo "项目目录不存在: $PROJECT_DIR" >&2
+  exit 1
+fi
+
+if [ -n "$CTX_ID" ]; then
+  LOG_FILE=/tmp/codex-output-$CTX_ID.log
+  DONE_FILE=/tmp/codex-done-$CTX_ID
+else
+  LOG_FILE=/tmp/codex-output.log
+  DONE_FILE=/tmp/codex-done
+fi
+TASK_FILE=$(mktemp /tmp/codex-task.XXXXXX)
+
+shell_quote() {
+  printf "'%s'" "$(printf "%s" "$1" | sed "s/'/'\\\\''/g")"
+}
+
+PROJECT_DIR_Q=$(shell_quote "$PROJECT_DIR")
+LOG_FILE_Q=$(shell_quote "$LOG_FILE")
+DONE_FILE_Q=$(shell_quote "$DONE_FILE")
+TASK_FILE_Q=$(shell_quote "$TASK_FILE")
+
+if [ -n "$RESUME_FLAG" ]; then
+  CODEX_CMD='codex exec resume --last --full-auto --skip-git-repo-check'
+else
+  CODEX_CMD='codex exec --full-auto --skip-git-repo-check'
+fi
+
+printf '%s' "$TASK" > "$TASK_FILE"
+: > "$LOG_FILE"
+rm -f "$DONE_FILE"
+
+RUN_CMD="cd $PROJECT_DIR_Q && $CODEX_CMD \"\$(cat $TASK_FILE_Q)\" 2>&1 | tee $LOG_FILE_Q; printf '\nCODEX_DONE\n' >> $LOG_FILE_Q; touch $DONE_FILE_Q; rm -f $TASK_FILE_Q"
+WATCH_CMD="tail -f $LOG_FILE_Q & TAIL_PID=\$!; while [ ! -f $DONE_FILE_Q ]; do sleep 1; done; kill \$TAIL_PID 2>/dev/null; wait \$TAIL_PID 2>/dev/null; printf '\\n=== Codex 完成 ===\\n'"
+
+if [ -n "$WATCH_FLAG" ]; then
+  nohup sh -c "$RUN_CMD" > /dev/null 2>&1 &
+  osascript - "$WATCH_CMD" "$CTX_ID" <<'EOF'
+on run argv
+  set cmd to item 1 of argv
+  set ctxId to item 2 of argv
+  tell application "Terminal"
+    set marker to ""
+    set targetWindow to missing value
+    if ctxId is not "" then
+      set marker to "Codex-" & ctxId
+      repeat with w in windows
+        try
+          repeat with t in tabs of w
+            if custom title of t contains marker then
+              set targetWindow to w
+              exit repeat
+            end if
+          end repeat
+          if targetWindow is not missing value then
+            exit repeat
+          end if
+        end try
+      end repeat
+    end if
+    try
+      if ctxId is not "" and targetWindow is not missing value then
+        set newTab to do script cmd in targetWindow
+        set custom title of newTab to marker
+        set selected tab of targetWindow to newTab
+      else
+        set newTab to do script cmd
+        set targetWindow to front window
+        if ctxId is not "" then
+          set custom title of newTab to marker
+        end if
+        set selected tab of targetWindow to newTab
+      end if
+    on error
+      set newTab to do script cmd
+      set targetWindow to front window
+      if ctxId is not "" then
+        set custom title of newTab to marker
+      end if
+      set selected tab of targetWindow to newTab
+    end try
+    activate
+  end tell
+end run
+EOF
+  printf '%s\n' 'Codex 已启动，并已在 Terminal.app 新窗口中实时显示输出'
+else
+  nohup sh -c "$RUN_CMD" > /dev/null 2>&1 &
+  printf '%s\n' "Codex 已静默启动；如需查看，请手动执行: tail -f $LOG_FILE"
+fi
+
+exit 0
