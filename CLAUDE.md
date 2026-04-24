@@ -255,7 +255,7 @@ Codex 更新 `CLAUDE.md` 时必须遵守：
 本机 Maven 本地仓库路径已修改为：
 
 ```
-/Users/zoujunyong/repository
+/Users/xxxxx/repository
 ```
 
 查找 jar 包、源码、依赖时，统一去此目录查找，**不要去默认的 `~/.m2/repository`**。
