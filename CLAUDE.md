@@ -34,7 +34,7 @@
 > ❌ **给 Codex 下达任务时，不得把任何具体实现（代码、HTML、配置）塞进指令让 Codex 照抄——只说目标和约束，实现由 Codex 决定**
 > ❌ 严禁以「省事」为理由增加输出内容，所有回答必须精简且到位
 > ❌ **当 Codex 在执行中途提出需要确认的问题时，Claude 必须主动分析问题并给出建议答案（明确选哪项及理由），告知用户确认后再用 `--resume` 将答案传给 Codex 继续执行；若 Claude 无法判断，必须主动找用户沟通，不得沉默、忽略或搁置。此规则属于严禁忽略的强制规则，与其他核心禁令并列，违反即违规**
-> ❌ **每次审查 Codex 输出的代码时，Claude 必须先调用 Skill 工具并传入 `skill='review'` 执行代码审查插件，再根据插件输出决定是否打回 Codex 修改。此规则属于严禁忽略的强制规则，与其他核心禁令并列，违反即违规**
+> ❌ **每次审查 Codex 输出的代码时，禁止调用 `skill='review'`（该 skill 无 PR 时空转无效）。必须手动审查：先用 Read 工具读取 `~/.claude/code-review-checklist.md`，再 `git diff --stat HEAD` 定位改动文件，逐项执行检查清单。此规则属于严禁忽略的强制规则，与其他核心禁令并列，违反即违规**
 
 **唯一例外（降级条件）：**
 
@@ -70,8 +70,9 @@
 - ❌ **严禁把具体代码片段、实现方案、完整函数体、HTML 结构、表格布局、配置片段塞进指令里让 Codex 照抄——即使改动看起来很简单，实现一律由 Codex 自己决定**
 - Codex 自己有完整的代码上下文，能自行读取文件、理解现有实现、决定怎么写
 - 调用 Codex 时，严禁使用任何代码作为沟通依据。必须以方案传递需求，像产品经理与程序员沟通一样——说清楚需求是什么、为什么、达到什么效果即可，实现方式和落地方案全部由 Codex 自行判断。验收不通过时，只描述哪里不符合预期，让 Codex 自己想办法修改，严禁告诉 Codex 怎么改、在哪里改。Claude 的职责只在沟通，不在开发。
+- ❌ **严禁在任务指令里重复描述项目 CLAUDE.md 中已有的设计细节**（如 DDL 字段定义、业务规则、接口约定等）。这些内容 Codex 自己会读 CLAUDE.md 获取，任务里只写「详见项目 CLAUDE.md [章节名]」即可。任务指令只需包含：本次新增的目标、新增的约束、与 CLAUDE.md 现有内容的差异点。
 
-> 原则：我负责说清楚"做什么、为什么"，Codex 负责决定"怎么做"。
+> 原则：我负责说清楚"做什么、为什么"，Codex 负责决定"怎么做"。CLAUDE.md 里有的内容，指向它，不复述。
 
 ---
 
@@ -102,13 +103,20 @@ while [ ! -f /tmp/codex-done-<ctx-id> ]; do sleep 1; done && echo "CODEX_DONE"
 ```
 
 **看时的后台监听：**
+```bash
+# 用自己的 Bash 工具（run_in_background=true, timeout=600000）
+while true; do
+  if tail -30 /tmp/codex-output-<ctx-id>.log 2>/dev/null | grep -q "未确认的问题\|需要你确认\|请问\|请确认\|你来决定"; then echo "CODEX_QUESTION"; break; fi
+  if [ -f /tmp/codex-done-<ctx-id> ]; then echo "CODEX_DONE"; break; fi
+  sleep 5
+done
 ```
-用 Agent 工具启动后台 agent，agent prompt 要求：用 Bash 工具（timeout=600000）循环执行最多 6 轮。每轮逻辑如下：
-1. 每隔 5 秒检查一次完成文件（有 --ctx 时为 /tmp/codex-done-<ctx-id>，无 --ctx 时为 /tmp/codex-done）
-2. 同时用 grep 扫描日志文件末尾 50 行（/tmp/codex-output-<ctx-id>.log），检测是否含有提问关键词：「未确认的问题」「需要你确认」「请问」「请确认」「是否」「你来决定」
-3. 命中完成文件 → 返回 CODEX_DONE；命中提问关键词 → 返回 CODEX_QUESTION；两者都未命中 → 继续等待
-6 轮全部超时则返回 TIMEOUT。总覆盖约 1 小时。
-```
+
+> ⚠️ **强制，无例外（已踩坑）**：严禁用 Agent/subagent 做监听——subagent 的 Bash 工具权限在沙盒环境下会被拒绝，导致整个监听失效。必须用 Claude **自己的** Bash 工具（`run_in_background=true, timeout=600000`）直接执行上述循环。
+>
+> ⚠️ **强制，无例外（已踩坑）**：`codex-run --watch` 脚本本身退出（exit code 0）仅代表 Terminal 窗口已打开，**不代表 Codex 任务完成**。严禁把 codex-run 脚本的退出通知当作 CODEX_DONE，必须等完成文件出现才算完成。
+>
+> ⚠️ **正确时序**：`codex-run --watch` 与 Bash 后台轮询必须在**同一条消息**里并行发出，不得先等 codex-run 退出再启动轮询。
 
 **收到 `CODEX_QUESTION` 时的处理流程（强制）：**
 1. 立即用 Bash 读取日志末尾：`tail -80 /tmp/codex-output-<ctx-id>.log`
@@ -255,7 +263,13 @@ Codex 更新 `CLAUDE.md` 时必须遵守：
 本机 Maven 本地仓库路径已修改为：
 
 ```
-/Users/xxxxx/repository
+/Users/zoujunyong/repository
 ```
 
 查找 jar 包、源码、依赖时，统一去此目录查找，**不要去默认的 `~/.m2/repository`**。
+
+---
+
+## 5. 数据库连接规则
+
+当需要连接数据库时（无论数据库类型，包括 MySQL、PostgreSQL、Redis、MongoDB 等），优先使用 Python 通过对应驱动库连接并执行操作，不依赖本地客户端命令行工具。

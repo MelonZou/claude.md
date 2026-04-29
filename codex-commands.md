@@ -83,5 +83,5 @@ trust_level = "trusted"
 - 若不存在 → **立即添加，再调用 Codex**，否则 Codex 会以沙盒只读模式运行，无法写入任何文件
 
 > 信任配置文件路径：`~/.codex/config.toml`  
-> 当前已信任目录：xxxxxx
+> 当前已信任目录：`/Users/zoujunyong/Desktop/浦东ai值班`、`/Users/zoujunyong/Desktop/虹桥ai值班`
 
