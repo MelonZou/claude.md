@@ -84,3 +84,17 @@ trust_level = "trusted"
 
 > 信任配置文件路径：`~/.codex/config.toml`  
 
+---
+
+### Bash prompt 引号规则（反引号会被 zsh 吃掉）
+
+通过 Bash 工具拼 `codex-run`、`codex exec` 这类长命令时，如果外层用双引号包 prompt，prompt 里的 Markdown 反引号会先被 zsh 当成命令替换执行。结果通常不是单纯报错，而是反引号包住的关键内容被替换成空字符串，Codex 收到的任务参数已经残缺。
+
+2026-05-07 发生过一次真实事故：prompt 里把主断点、固定宽度等关键词写成反引号代码标记，zsh 先报 `command not found: 1440px`、`number expected`，随后 Codex 收到的 prompt 里这些位置都变空，导致响应式任务缺少关键约束。
+
+**规避规则：**
+
+- Bash 命令里写长 prompt 时，默认不要用反引号做 Markdown code 标记。
+- 需要强调代码词时，优先用全角括号『...』、普通单引号、普通双引号，或直接不加标记。
+- 如果必须保留反引号，外层 prompt 改用单引号包裹；或者在每个反引号前加反斜杠转义。
+- 看到 zsh 报 `command not found`、`number expected` 之类错误时，不要继续认为 prompt 已正常传入；必须重新检查 Codex 实际收到的任务文本。
