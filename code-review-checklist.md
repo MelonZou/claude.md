@@ -15,10 +15,21 @@
 
 ---
 
-## Spring Bean 专项（有新增 @Service / @Component 时必查）
+## Spring Bean 专项（强制，无例外）
 
-- [ ] 列出所有新 bean 的构造注入依赖关系（逐个文件检查 `private final` 字段）
-- [ ] **显式检查循环依赖**：画出 A→B→A 的依赖图，存在环则必须打回。这是 Spring 启动失败的高频原因，不能等运行时才发现
+**触发条件（任一成立即必须执行）**：
+- 新增 @Service / @Component / @Repository
+- **已有 Service 新增 / 修改了任何注入字段**（不论是构造注入 `private final` 还是 `@Autowired` 字段注入）
+- 已有 Service 改了 setter 注入或 @Resource 注入
+
+> ⚠️ "已有 Service 加新依赖" 是循环依赖最高发场景，比新建 Bean 更隐蔽，**必须重点查**。本规则曾因触发条件只覆盖"新增 Bean"而漏检，2026-05-12 扩大覆盖到所有依赖变更。
+
+**必查项**：
+
+- [ ] 列出本次改动涉及的每个 Bean 的全部注入依赖（构造 `private final` + `@Autowired` 字段 + setter / @Resource，全部列）
+- [ ] **显式画出 A→B→A 的依赖图**，存在环 → 必须打回。Spring Boot 2.6+ 默认 `allow-circular-references=false`，环存在即启动失败
+- [ ] 检查混合注入（同一 Bean 同时存在构造注入 + 字段注入）：构造环可能直接启动失败；字段环靠延迟初始化可能侥幸通过，但仍属违规，一并打回
+- [ ] 解环优先方案：把 Service→Service 改成 Service→Mapper（Mapper 不参与 Service 互引环）
 
 ---
 
