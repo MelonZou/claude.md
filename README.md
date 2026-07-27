@@ -1,138 +1,103 @@
 # Caveman CLAUDE.md
 
-> 一套让 Claude **输出 token 大幅缩减** 的配置方案。同等技术准确度，回复体积砍到原来的 1/3。
+> 一套让 Claude **输出 token 大幅缩减**的全局配置。同等技术准确度，回复体积砍掉 2/3，账单跟着瘦身。
 
-## 中心思想
+## 核心思想
 
-**Claude 默认很啰嗦。**
+**Claude 默认很啰嗦**：开头铺垫「Sure! I'd be happy to...」、中间解释「The reason this works is...」、结尾总结「To summarize...」，充斥 `just / really / basically` 这类填充词。这些字不传递任何技术信息，却在烧 output token —— 通常比 input token 贵 **3~5 倍**。
 
-- 开头铺垫：`Sure! I'd be happy to help you with that...`
-- 中间解释：`The reason this works is because...`
-- 结尾总结：`To summarize what we just did...`
-- 充斥填充词：`just / really / basically / actually / simply`
+`~/.claude/CLAUDE.md` 开头两行强制条款，是整套方案的发动机：
 
-这些字 **不传递任何技术信息**，但每个字都在烧你的 output token —— 而 output token 通常比 input 贵 **3~5 倍**。
-
-本仓库通过一份精心设计的 `CLAUDE.md` 全局规则，**强制 Claude 用 Caveman 风格输出**：
-
-> `[对象] [动作] [原因]. [下一步].`
+> 「Codex 正在盯着你的每一个输出，随时准备挑战并击败你。」
+> 「禁止多余表格、仅为举例附上的完整代码块、冗余标题层级、解释性总结段落。」
 
 技术内容一字不少，废话一字不留。
 
-## 省了多少
+## 效果对比
 
-| 场景 | 原始输出 | Caveman 输出 | 缩减 |
-|------|---------|------------|------|
+| 场景 | 普通输出 | 精简输出 | 缩减 |
+|------|---------|---------|------|
 | 解释一个 bug | ~180 字 | ~45 字 | **75%** |
 | 给出修复方案 | ~250 字 | ~80 字 | **68%** |
 | 多步骤指南 | ~600 字 | ~200 字 | **66%** |
 
-按月度对话量估算，长期使用 Claude API / Claude Code 的开发者，**输出账单可降 50%~70%**。
-
-## 对比示例
-
 **问：React 组件为什么重复渲染？**
 
-普通输出（≈ 110 token）：
-> Sure! Great question. The reason your React component is re-rendering on every parent update is likely because you're passing an inline object as a prop. Each render creates a new object reference, which React's reconciliation treats as a changed prop, triggering a re-render of the child. To fix this, you can wrap the object in `useMemo`...
+普通输出（≈110 token）：
+> Sure! Great question. The reason your component re-renders on every parent update is likely because you're passing an inline object as a prop. Each render creates a new reference, which React treats as a changed prop...
 
-Caveman 输出（≈ 25 token）：
+精简输出（≈25 token）：
 > 内联对象 prop 每渲染生成新引用 = 子组件重渲染。`useMemo` 包住即可。
 
-**信息量完全相同，token 砍掉 77%。**
+信息量相同，token 砍掉 77%。
 
-## 工作原理
+## 规则不是纸上谈兵——条条来自真实翻车
 
-1. `~/.claude/CLAUDE.md` 全局规则 —— 每次会话自动加载，作为「主索引」
-2. 规则强制约束输出风格：删冠词、删客套、删铺垫、删总结、保留技术术语与代码块
-3. 触发词 / `/caveman` 斜杠命令切换强度（lite / full / ultra）
-4. 配套 Codex 协作流，把代码落地这种「必须详细」的工作交给另一个 Agent，Claude 只做高密度判断输出
-5. 主 CLAUDE.md 拆出两份独立规则文件，按场景按需加载，避免每次会话都把所有规则塞进上下文
+`role-collaboration-rules.md` 和 `code-review-checklist.md` 里每一条强制约束背后都有一次具体事故，比如：
 
-## 全局规则结构
+- 要求 Codex「自己起服务验证前端效果」→ 它的沙盒没有浏览器也没有 node，卡住交白卷，一整轮空跑
+- Bash 命令里用反引号包关键词，被 zsh 当命令替换执行，Codex 收到的任务参数悄悄变空
+- 心算 15 条明细求和算错，没验证就把错误金额当结论汇报给用户
+- 中台返回 `data=[]`，被下游误判成「列表为空 = 全部合格」，SKU 全部误判为可售
 
-主文件 `~/.claude/CLAUDE.md` 现已模块化，章节如下：
+这些坑都固化成了检查清单里的一行，不用再踩第二次。
+
+## 全局规则地图
+
+主文件 `~/.claude/CLAUDE.md` 已模块化，会话启动只加载主索引：
 
 | 章节 | 内容 | 加载方式 |
 |------|------|---------|
-| 顶部 caveman 风格规则 | 输出精简、禁止冗余 | 会话启动自动加载 |
-| §0 角色分工与协作规范 | Claude 不写代码、全交 Codex、--watch 询问、Monitor 监听等 | **按需启用**：每轮新任务前 Claude 问用户是否启用，启用才 Read `role-collaboration-rules.md` |
-| §1 不明确必须提问 | 任何歧义都先问用户 | 永远生效 |
-| §2 CLAUDE.md 工作流 | 项目识别、读取项目 CLAUDE.md、更新规范 | **每轮对话必读** `claude-md-workflow.md`（除非用户明确豁免本轮） |
-| §3 语言规则 | 简体中文 | 永远生效 |
+| 开头强制条款 | 输出精简、禁止冗余表格/总结/铺垫 | 会话启动自动加载，永远生效 |
+| §0 角色分工与协作规范 | Claude 不写代码、全交 Codex、串行拆分大任务、`--watch` 询问、Monitor 监听、验证/排查归属 | **按需启用**：每轮新任务前先问用户，启用才 Read `role-collaboration-rules.md` |
+| §1 不明确必须提问 | 任何歧义先问；抛开现象看本质，结论必须工具验证过 | 永远生效 |
+| §2 CLAUDE.md 工作流 | 项目识别、Index 优先读取、业务逻辑文档写入规范 | **每轮对话强制** Read `claude-md-workflow.md`（涉及项目改动时） |
+| §3 语言规则 | 全程简体中文，含内部思考 | 永远生效 |
 | §4 Maven 路径 | 本地仓库改到 `/Users/zoujunyong/repository` | 永远生效 |
-| §5 数据库连接 | 优先 Python 驱动，不用 CLI | 永远生效 |
-| §6 代码审查规则 | 任何代码改动后必须读 `code-review-checklist.md` 逐项执行 | **全局强制**：不论 Claude 还是 Codex 写的代码，都由 Claude 按清单审查 |
+| §5 数据库连接 | 优先 Python 驱动连接，不用本地 CLI | 永远生效 |
+| §6 代码审查规则 | 任何代码/配置改动后必读 `code-review-checklist.md` 逐项执行；可搭配内置 `code-review`/`security-review` 但不能替代 | **全局强制**，执行人永远是 Claude |
+| §7 个人知识库 Wiki | 技术选型、坑点、工时估算的跨项目沉淀 | **每轮强制** Read `~/wiki/index.md`，写入前必读 `schema.md` |
+| §8 浏览器验证前置检查 | 验证前先问、端口占用先查再决定是否重启服务 | 涉及浏览器验证动作时强制 |
 
 ## 文件结构
 
 | 文件 | 用途 | 加载时机 |
 |------|------|---------|
 | `CLAUDE.md` | 全局规则主索引 | 会话启动自动加载 |
-| `role-collaboration-rules.md` | 「角色分工与协作规范」完整内容（Claude/Codex 分工、--watch、Monitor、审查清单等） | 每轮新任务前 Claude 问用户是否启用，启用才 Read |
-| `claude-md-workflow.md` | 「CLAUDE.md 工作流」完整内容（项目识别、读取、更新流程） | 每轮对话必读 |
-| `codex-commands.md` | Codex 命令速查 | 调用 Codex 前 Read |
-| `code-review-checklist.md` | 代码审查清单 | 任何代码改动后 Read 并逐项执行 |
-| `codex-run` | Codex 异步启动脚本（核心配套工具） | 调用 Codex 时执行 |
-| `hooks/inject-project-claude-md.sh` | UserPromptSubmit hook 脚本，自动把当前 cwd 的项目 CLAUDE.md 注入到上下文。**当前未在 settings.json 注册**（启用时把 hook 节加回 `~/.claude/settings.json` 即可） | 注册后每轮自动触发 |
+| `role-collaboration-rules.md` | §0 完整内容：Claude/Codex 分工、任务拆分、验证/排查归属、Codex 交互流程 | 用户确认启用后 Read |
+| `claude-md-workflow.md` | §2 完整内容：项目识别、CLAUDE.md 索引与业务文档写入规范 | 每轮对话强制 Read |
+| `codex-commands.md` | Codex 命令速查 + `--ctx`/`--resume` 规则 + 历史踩坑记录 | 调用 Codex 前必读 |
+| `code-review-checklist.md` | 代码审查清单，持续积累 | 任何代码改动后 Read 并逐项执行 |
+| `codex-run`（`~/.local/bin/`） | Codex 异步启动脚本 | 调用 Codex 时执行 |
+| `hooks/inject-project-claude-md.sh` | 自动注入项目 CLAUDE.md 的 hook 脚本，**当前未在 settings.json 注册** | 注册后每轮自动触发 |
+| `~/wiki/`（`index.md`/`schema.md`/`log.md`/`pages/`） | 跨项目知识库，§7 强制加载 | 每轮读 `index.md`，写入前读 `schema.md` |
 
 ### 模块化的好处
 
-- **主 CLAUDE.md 更短**：会话启动只加载主索引（约 80 行），不会一次性塞进所有规则
+- **主 CLAUDE.md 更短**：会话启动只加载主索引，不会一次性塞进所有规则
 - **按需加载**：角色分工只在需要时启用，不强制每次都走重流程
-- **独立维护**：修改某条规则只动一个文件，不会污染主 CLAUDE.md
-- **冲突隔离**：每份独立文件职责单一，互不耦合
+- **独立维护**：改一条规则只动一个文件，不污染主索引
+- **冲突隔离**：每份文件职责单一，互不耦合
 
-## codex-run 脚本
+## codex-run：把「必须啰嗦」的活外包出去
 
-省 token 的另一半秘密：**把代码落地丢给 Codex，Claude 只做判断**。
-
-`codex-run` 是配套的异步启动脚本，让 Claude 一行命令把任务扔给 Codex，自己继续做高密度输出。
-
-### 用法
+省 token 的另一半秘密：**代码落地丢给 Codex，Claude 只做判断**。
 
 ```bash
-codex-run <project_dir> <task> [--resume] [--watch]
+codex-run <project_dir> "<task>" --ctx <uuid> [--resume] [--watch]
 ```
 
-| 参数 | 说明 |
-|------|------|
-| `<project_dir>` | Codex 工作目录 |
-| `<task>` | 任务描述（自然语言） |
-| `--resume` | 接着上一轮 Codex 上下文继续干 |
-| `--watch` | 自动弹出新终端实时附着 `tmux` 会话查看进度 |
+- `--ctx <uuid>`：同一对话全程复用同一个值，决定日志文件名和 Terminal 窗口标记，多轮调用不开新窗口
+- `--resume`：接续上一轮 Codex 会话上下文
+- `--watch`：自动弹出终端实时查看；不传则静默后台跑，Claude 用完成标记文件轮询
 
-### 工作机制
+Codex 写代码 = 在它自己的进程里跑，**完全不消耗 Claude 的 output token**；Claude 只负责分析需求、拆任务、审查结果——全部高密度短输出。
 
-- 在 `tmux` 会话 `codex-work` 内异步执行 `codex exec`
-- 日志写入 `/tmp/codex-output-<ctx-id>.log`
-- 任务完成 → 创建标记文件 `/tmp/codex-done-<ctx-id>`
-- Claude 通过轮询标记文件判断完成，无需阻塞对话
-
-### 终端弹出策略
-
-仅当 **同时满足** 以下三条才弹窗：
-
-1. 显式传入 `--watch`
-2. 当前不存在 `codex-work` 会话
-3. 本次不是 `--resume`
-
-否则一律静默后台运行，避免重复弹窗骚扰。
-
-### 为什么这套设计省 token
-
-- Claude 写代码 = 大量 output token（注释、解释、完整代码块）
-- Codex 写代码 = 在它自己的进程里跑，**完全不消耗 Claude 的 output token**
-- Claude 只负责：分析需求 → 拆任务 → 审查结果（全部高密度短输出）
-
-**Claude 当指挥，Codex 当工人。** 指挥说话短，工人闷头干。账单自然薄。
+**Claude 当指挥，Codex 当工人。指挥说话短，工人闷头干，账单自然薄。**
 
 ## 使用方法
 
-1. 克隆本仓库
-2. `cp CLAUDE.md ~/.claude/CLAUDE.md`
-3. 重启 Claude Code 会话
-4. 体感：回复变短，信息密度变高，账单变薄
+已在本机生效于 `~/.claude/CLAUDE.md`，无需额外操作。要迁移到其他机器：把本目录下这几份 `.md` 文件、`codex-run` 脚本按上表路径复制过去，重启 Claude Code 会话即可生效。
 
 ## 何时不用
 
@@ -141,7 +106,3 @@ codex-run <project_dir> <task> [--resume] [--watch]
 - 与非技术用户沟通
 
 技术对话场景闭眼用。
-
-## License
-
-MIT

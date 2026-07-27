@@ -98,3 +98,25 @@ trust_level = "trusted"
 - 需要强调代码词时，优先用全角括号『...』、普通单引号、普通双引号，或直接不加标记。
 - 如果必须保留反引号，外层 prompt 改用单引号包裹；或者在每个反引号前加反斜杠转义。
 - 看到 zsh 报 `command not found`、`number expected` 之类错误时，不要继续认为 prompt 已正常传入；必须重新检查 Codex 实际收到的任务文本。
+
+---
+
+### 严禁在 Bash 命令字符串末尾再叠加 `&`（会把 codex-run 提前杀死）
+
+调用 `codex-run` 时，只需要把整条 `codex-run ...` 命令交给 Bash 工具本身的 `run_in_background=true` 参数去后台执行；**严禁**在命令字符串末尾再手动加 `&` 把它放进 shell 后台（例如写成 `codex-run ... &\nCODEX_PID=$!\necho ...`）。
+
+**踩坑现象（2026-07-22）**：命令内部叠加 `&` 后，`codex-run` 这条 job 立刻转入后台，紧跟着的 `echo` 几乎瞬间执行完，导致 Bash 工具判定"这条后台任务已完成"并立刻退出外层 shell。此时 `codex-run` 脚本本身可能才刚起步，还没执行到它内部真正做后台保护的 `nohup sh -c "$RUN_CMD" ... &` 那一行，就随外层 shell 退出被连带发送 SIGHUP 杀死。结果是：`codex-run` 的 Bash 调用正常返回 `exit code 0`（look 起来像成功了），但 `/tmp/codex-output-<ctx-id>.log` 根本没被创建，`ps aux` 里也找不到任何 `codex exec` 或对应 `sh -c` 进程——**这不是 Codex 在思考或卡住，是 codex-run 从未真正跑起来**。
+
+**正确调用方式**：
+```
+# 正确：命令字符串里不加末尾 &，只靠 Bash 工具的 run_in_background=true 后台执行
+codex-run <项目目录> "任务描述" --ctx <uuid>
+```
+```
+# 错误：命令内部又叠加一层 &，会把 codex-run 提前杀死
+codex-run <项目目录> "任务描述" --ctx <uuid> &
+CODEX_PID=$!
+echo "已启动"
+```
+
+**排查信号**：如果调用后用户反馈"怎么还没好""是不是卡住了"，先检查 `/tmp/codex-output-<ctx-id>.log` 是否存在、`ps aux | grep "codex exec"` 是否有对应进程。日志文件不存在 + 找不到进程 = 大概率是本条坑，需要清理残留的 done/log 文件后，用正确方式重新发起（因为 Codex 从未真正开始过，这次重新调用不算"第二次调用"，不需要加 `--resume`）；日志文件存在且在持续增长、进程也在跑，才是真的在正常执行中，应继续等待而非重新发起。
